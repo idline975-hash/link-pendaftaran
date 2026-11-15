@@ -74,6 +74,13 @@ export class UnauthorizedCommitteeError extends Error {
   }
 }
 
+class ServerApiUnavailableError extends Error {
+  constructor(message = 'Backend sinkronisasi tidak tersedia pada hosting statis.') {
+    super(message);
+    this.name = 'ServerApiUnavailableError';
+  }
+}
+
 const REG_CACHE_KEY = 'hut_ri_81_hybrid_registrations_v1';
 const EVENT_CACHE_KEY = 'hut_ri_81_hybrid_event_info_v1';
 const SYNC_QUEUE_KEY = 'hut_ri_82_server_sync_queue_v1';
@@ -234,6 +241,7 @@ export class HybridRegistrationRepository implements RegistrationRepository {
   private lastErrorMessage: string | null = null;
   private permissionBlocked = false;
   private serverStreamConnected = false;
+  private serverApiAvailable: boolean | null = null;
 
   private serverEventSource: EventSource | null = null;
   private publicEventSource: EventSource | null = null;
@@ -256,7 +264,12 @@ export class HybridRegistrationRepository implements RegistrationRepository {
         this.lastErrorMessage = null;
         this.emitSyncStatus();
         void this.flushSyncQueue();
-        if (this.hasCommitteeSession() && this.registrationListeners.size > 0) {
+        if (
+          this.hasCommitteeSession() &&
+          this.registrationListeners.size > 0 &&
+          this.getCommitteeToken() &&
+          this.serverApiAvailable !== false
+        ) {
           this.attachServerRegistrationsStream();
         }
       });
@@ -293,11 +306,64 @@ export class HybridRegistrationRepository implements RegistrationRepository {
     window.sessionStorage.setItem(TOKEN_KEY, token);
   }
 
+  private isStaticLocalSession(): boolean {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.sessionStorage.getItem(SESSION_KEY) === 'local';
+    } catch {
+      return false;
+    }
+  }
+
+  private isJsonResponse(res: Response): boolean {
+    const contentType = res.headers.get('content-type') || '';
+    return contentType.toLowerCase().includes('application/json');
+  }
+
+  private attachPublicEventStream(): void {
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
+    if (this.publicEventSource) return;
+
+    try {
+      this.publicEventSource = new EventSource('/api/event-info/stream');
+      this.publicEventSource.addEventListener('event_info', (event) => {
+        try {
+          const parsed = JSON.parse((event as MessageEvent<string>).data) as {
+            eventInfo?: EventInfo;
+          };
+          if (
+            parsed?.eventInfo &&
+            !this.getSyncQueue().some((op) => op.type === 'event_info')
+          ) {
+            const clean = upgradeLegacyEventInfo(sanitizeEventInfo(parsed.eventInfo));
+            this.setCachedEventInfo(clean);
+            this.eventListeners.forEach((cb) => cb(clean));
+          }
+        } catch {
+          // ignore malformed event
+        }
+      });
+    } catch {
+      // ignore EventSource errors
+    }
+  }
+
   private initPublicServerListeners(): void {
     if (typeof window === 'undefined') return;
 
     fetch('/api/event-info')
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        if (res.status === 404 || (res.ok && !this.isJsonResponse(res))) {
+          this.serverApiAvailable = false;
+          return null;
+        }
+        if (!res.ok || !this.isJsonResponse(res)) {
+          return null;
+        }
+        this.serverApiAvailable = true;
+        this.attachPublicEventStream();
+        return res.json();
+      })
       .then((data: { eventInfo?: EventInfo } | null) => {
         if (data?.eventInfo && !this.getSyncQueue().some((op) => op.type === 'event_info')) {
           const clean = upgradeLegacyEventInfo(sanitizeEventInfo(data.eventInfo));
@@ -308,31 +374,6 @@ export class HybridRegistrationRepository implements RegistrationRepository {
       .catch(() => {
         // Offline / server unavailable - keep local cache
       });
-
-    if (typeof EventSource !== 'undefined') {
-      try {
-        this.publicEventSource = new EventSource('/api/event-info/stream');
-        this.publicEventSource.addEventListener('event_info', (event) => {
-          try {
-            const parsed = JSON.parse((event as MessageEvent<string>).data) as {
-              eventInfo?: EventInfo;
-            };
-            if (
-              parsed?.eventInfo &&
-              !this.getSyncQueue().some((op) => op.type === 'event_info')
-            ) {
-              const clean = upgradeLegacyEventInfo(sanitizeEventInfo(parsed.eventInfo));
-              this.setCachedEventInfo(clean);
-              this.eventListeners.forEach((cb) => cb(clean));
-            }
-          } catch {
-            // ignore malformed event
-          }
-        });
-      } catch {
-        // ignore EventSource errors
-      }
-    }
   }
 
   private initCloudListeners(): void {
@@ -854,6 +895,10 @@ export class HybridRegistrationRepository implements RegistrationRepository {
   }
 
   private async executeServerOperation(op: SyncOperation): Promise<void> {
+    if (this.serverApiAvailable === false) {
+      throw new ServerApiUnavailableError();
+    }
+
     const token = this.getCommitteeToken();
 
     if (op.type === 'create') {
@@ -872,13 +917,21 @@ export class HybridRegistrationRepository implements RegistrationRepository {
           competitions: reg.competitions,
         }),
       });
+      if (res.status === 404 || (res.ok && !this.isJsonResponse(res))) {
+        this.serverApiAvailable = false;
+        throw new ServerApiUnavailableError();
+      }
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
+      this.serverApiAvailable = true;
       return;
     }
 
     if (!token) {
+      if (this.isStaticLocalSession()) {
+        throw new ServerApiUnavailableError();
+      }
       throw new UnauthorizedCommitteeError();
     }
 
@@ -977,8 +1030,17 @@ export class HybridRegistrationRepository implements RegistrationRepository {
 
     try {
       for (const op of queue) {
-        if (op.type !== 'create' && !this.getCommitteeToken()) {
-          remaining.push(op);
+        const hasToken = Boolean(this.getCommitteeToken());
+        const isStaticMode = this.isStaticLocalSession() || this.serverApiAvailable === false;
+
+        if (op.type !== 'create' && !hasToken) {
+          if (isStaticMode) {
+            await this.mirrorToFirestoreBestEffort(op);
+            syncedCount += 1;
+            this.lastErrorMessage = null;
+          } else {
+            remaining.push(op);
+          }
           continue;
         }
 
@@ -988,6 +1050,12 @@ export class HybridRegistrationRepository implements RegistrationRepository {
           syncedCount += 1;
           this.lastErrorMessage = null;
         } catch (err) {
+          if (err instanceof ServerApiUnavailableError) {
+            await this.mirrorToFirestoreBestEffort(op);
+            syncedCount += 1;
+            this.lastErrorMessage = null;
+            continue;
+          }
           if (err instanceof UnauthorizedCommitteeError) {
             this.clearCommitteeSession();
             this.registrationErrorListeners.forEach((cb) => cb(err));
@@ -1162,8 +1230,11 @@ export class HybridRegistrationRepository implements RegistrationRepository {
 
   hasCommitteeSession(): boolean {
     if (typeof window === 'undefined') return false;
-    const unlocked = window.sessionStorage.getItem(SESSION_KEY) === '1';
-    if (!unlocked) return false;
+    const sessionFlag = window.sessionStorage.getItem(SESSION_KEY);
+    if (sessionFlag === 'local') {
+      return true;
+    }
+    if (sessionFlag !== '1') return false;
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       return true;
     }
@@ -1189,7 +1260,11 @@ export class HybridRegistrationRepository implements RegistrationRepository {
     const cleanPin = pin.trim();
     if (!cleanPin) return false;
 
-    if (typeof navigator !== 'undefined' && navigator.onLine) {
+    if (
+      typeof navigator !== 'undefined' &&
+      navigator.onLine &&
+      this.serverApiAvailable !== false
+    ) {
       try {
         const res = await fetch('/api/committee/login', {
           method: 'POST',
@@ -1198,15 +1273,21 @@ export class HybridRegistrationRepository implements RegistrationRepository {
         });
 
         if (res.status === 401) {
+          this.serverApiAvailable = true;
           return false;
         }
         if (res.status === 429) {
+          this.serverApiAvailable = true;
           const errData = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(
             errData.error || 'Terlalu banyak percobaan PIN salah. Tunggu sebentar lalu coba lagi.'
           );
         }
-        if (res.ok) {
+        if (res.status === 404 || (res.ok && !this.isJsonResponse(res))) {
+          // Hosting statis (tanpa backend server.ts): alihkan otomatis ke mode PIN lokal perangkat
+          this.serverApiAvailable = false;
+        } else if (res.ok && this.isJsonResponse(res)) {
+          this.serverApiAvailable = true;
           const data = (await res.json()) as { token?: string };
           if (data?.token) {
             this.setCommitteeSessionToken(data.token);
@@ -1221,10 +1302,14 @@ export class HybridRegistrationRepository implements RegistrationRepository {
             }
             return true;
           }
+          throw new Error(
+            `Server sinkronisasi panitia tidak merespons dengan benar (HTTP ${res.status}).`
+          );
+        } else {
+          throw new Error(
+            `Server sinkronisasi panitia tidak merespons dengan benar (HTTP ${res.status}).`
+          );
         }
-        throw new Error(
-          `Server sinkronisasi panitia tidak merespons dengan benar (HTTP ${res.status}).`
-        );
       } catch (err) {
         if (
           err instanceof Error &&
@@ -1233,13 +1318,21 @@ export class HybridRegistrationRepository implements RegistrationRepository {
         ) {
           throw err;
         }
-        // True network connectivity failure: allow local offline PIN check below
+        // Gangguan jaringan murni: lanjutkan verifikasi PIN lokal di bawah
       }
     }
 
     const valid = cleanPin === this.getStoredPin();
     if (valid && typeof window !== 'undefined') {
-      window.sessionStorage.setItem(SESSION_KEY, '1');
+      window.sessionStorage.removeItem(TOKEN_KEY);
+      window.sessionStorage.setItem(
+        SESSION_KEY,
+        this.serverApiAvailable === false ? 'local' : '1'
+      );
+      if (this.currentUser) {
+        this.attachCloudRegistrationsListener();
+      }
+      this.emitSyncStatus();
     }
     return valid;
   }
@@ -1249,6 +1342,16 @@ export class HybridRegistrationRepository implements RegistrationRepository {
     const cleanNew = newPin.trim();
     if (!/^[a-zA-Z0-9]{4,12}$/.test(cleanNew)) {
       throw new Error('PIN baru harus 4–12 karakter (huruf/angka tanpa spasi).');
+    }
+
+    if (this.isStaticLocalSession() || this.serverApiAvailable === false) {
+      if (cleanCurrent !== this.getStoredPin()) {
+        throw new Error('PIN saat ini tidak sesuai.');
+      }
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(PIN_CACHE_KEY, cleanNew);
+      }
+      return true;
     }
 
     const token = this.getCommitteeToken();
@@ -1264,6 +1367,19 @@ export class HybridRegistrationRepository implements RegistrationRepository {
       },
       body: JSON.stringify({ currentPin: cleanCurrent, newPin: cleanNew }),
     });
+
+    if (res.status === 404 || (res.ok && !this.isJsonResponse(res))) {
+      this.serverApiAvailable = false;
+      if (cleanCurrent !== this.getStoredPin()) {
+        throw new Error('PIN saat ini tidak sesuai.');
+      }
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(PIN_CACHE_KEY, cleanNew);
+        window.sessionStorage.removeItem(TOKEN_KEY);
+        window.sessionStorage.setItem(SESSION_KEY, 'local');
+      }
+      return true;
+    }
 
     const data = (await res.json().catch(() => ({}))) as {
       error?: string;
@@ -1302,8 +1418,10 @@ export class HybridRegistrationRepository implements RegistrationRepository {
     onData(this.getCachedRegistrations());
 
     if (this.hasCommitteeSession()) {
-      void this.pullLatestFromServer();
-      this.attachServerRegistrationsStream();
+      if (this.getCommitteeToken() && this.serverApiAvailable !== false) {
+        void this.pullLatestFromServer();
+        this.attachServerRegistrationsStream();
+      }
       if (this.currentUser) {
         this.attachCloudRegistrationsListener();
       }
