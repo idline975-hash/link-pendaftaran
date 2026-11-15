@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Calendar, Flag, MapPin } from 'lucide-react';
+import bannerImage from '../assets/images/merdeka_field_banner_1794569677670.jpg';
 import { EventInfo } from '../types/registration';
 
 interface HeroSectionProps {
@@ -62,7 +63,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ eventInfo }) => {
             <div className="relative h-64 w-full overflow-hidden rounded-xl border border-[#E7E2DC] bg-[#F5F2EC] sm:h-80 lg:h-full lg:min-h-[320px]">
               {!imageError ? (
                 <img
-                  src="/src/assets/images/merdeka_field_banner_1794569677670.jpg"
+                  src={bannerImage}
                   alt="Suasana lapangan perayaan HUT Kemerdekaan Indonesia Ke - 82 dengan hiasan bendera merah putih"
                   referrerPolicy="no-referrer"
                   onError={() => setImageError(true)}
