@@ -99,7 +99,7 @@ export const QrTicketCard: React.FC<QrTicketCardProps> = ({ registration, eventI
       .map((id) => COMPETITION_MAP[id]?.name ?? id)
       .join(', ');
     return [
-      `TIKET LOMBA HUT RI KE - 82`,
+      `TIKET ${eventInfo.title.toUpperCase()}`,
       `Kode Daftar: ${registration.registrationCode}`,
       `Nama Anak: ${registration.childName} (${registration.age} Tahun)`,
       `Orang Tua/Wali: ${registration.parentName}`,

@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React from 'react';
 import { Calendar, MapPin } from 'lucide-react';
-import { AgeGroupFilter, RUNDOWN_ITEMS } from '../data/rundownSchedule';
+import { RUNDOWN_ITEMS } from '../data/rundownSchedule';
 import { EventInfo } from '../types/registration';
 
 interface RundownSectionProps {
@@ -8,23 +8,10 @@ interface RundownSectionProps {
   onScrollToForm: () => void;
 }
 
-const AGE_FILTERS: { id: AgeGroupFilter; label: string }[] = [
-  { id: 'all', label: 'Semua Jadwal' },
-  { id: '3-6', label: 'Usia 3–6 Tahun' },
-  { id: '7-10', label: 'Usia 7–10 Tahun' },
-  { id: '11-15', label: 'Usia 11–15 Tahun' },
-];
-
 export const RundownSection: React.FC<RundownSectionProps> = ({
   eventInfo,
-  onScrollToForm,
 }) => {
-  const [selectedAgeGroup, setSelectedAgeGroup] = useState<AgeGroupFilter>('all');
-
-  const filteredItems = useMemo(() => {
-    if (selectedAgeGroup === 'all') return RUNDOWN_ITEMS;
-    return RUNDOWN_ITEMS.filter((item) => item.ageBuckets.includes(selectedAgeGroup));
-  }, [selectedAgeGroup]);
+  const filteredItems = RUNDOWN_ITEMS;
 
   return (
     <section

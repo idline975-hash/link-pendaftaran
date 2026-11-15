@@ -3,11 +3,15 @@ import { COMPETITION_MAP, Registration } from '../types/registration';
 import { formatDateTimeId } from './formatDate';
 
 function escapeCsvCell(value: string | number): string {
-  const str = String(value ?? '');
-  if (str.includes('"') || str.includes(',') || str.includes('\n') || str.includes(';')) {
-    return `"${str.replace(/"/g, '""')}"`;
+  const raw = String(value ?? '');
+  const safe =
+    raw.length > 1 && (/^[=@\t\r]/.test(raw) || /^[+-][A-Za-z(]/.test(raw))
+      ? `'${raw}`
+      : raw;
+  if (safe.includes('"') || safe.includes(',') || safe.includes('\n') || safe.includes(';')) {
+    return `"${safe.replace(/"/g, '""')}"`;
   }
-  return str;
+  return safe;
 }
 
 export function exportRegistrationsToCsv(

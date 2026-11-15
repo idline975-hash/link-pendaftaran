@@ -22,6 +22,7 @@ const TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 jam aktif untuk hari-H lomba
 interface ServerStoreData {
   pinHash: string;
   tokenSecret: string;
+  hadDeletions?: boolean;
   eventInfo: EventInfo;
   registrations: Registration[];
 }
@@ -128,6 +129,7 @@ class CommitteeStore {
           return {
             pinHash: parsed.pinHash,
             tokenSecret: parsed.tokenSecret,
+            hadDeletions: Boolean(parsed.hadDeletions),
             eventInfo: sanitizeEventInfo(parsed.eventInfo),
             registrations: Array.isArray(parsed.registrations)
               ? sortRegistrationsDesc(parsed.registrations)
@@ -143,6 +145,7 @@ class CommitteeStore {
     const initial: ServerStoreData = {
       pinHash: hashPin(initialPin),
       tokenSecret: crypto.randomBytes(32).toString('hex'),
+      hadDeletions: false,
       eventInfo: { ...DEFAULT_EVENT_INFO },
       registrations: [],
     };
@@ -168,6 +171,10 @@ class CommitteeStore {
 
   getRegistrations(): Registration[] {
     return this.data.registrations;
+  }
+
+  isFreshEmpty(): boolean {
+    return this.data.registrations.length === 0 && !this.data.hadDeletions;
   }
 
   verifyCommitteePin(pin: string): boolean {
@@ -341,6 +348,7 @@ class CommitteeStore {
     const before = this.data.registrations.length;
     this.data.registrations = this.data.registrations.filter((r) => r.id !== id);
     if (this.data.registrations.length !== before) {
+      this.data.hadDeletions = true;
       this.persistToDisk();
       return true;
     }

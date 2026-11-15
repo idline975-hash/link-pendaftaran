@@ -1115,13 +1115,19 @@ export class HybridRegistrationRepository implements RegistrationRepository {
       const data = (await res.json()) as {
         registrations?: Registration[];
         eventInfo?: EventInfo;
+        isFreshEmpty?: boolean;
       };
       const serverItems = Array.isArray(data.registrations) ? data.registrations : [];
       const localItems = this.getCachedRegistrations();
+      const hasPendingDeletes = this.getSyncQueue().some((op) => op.type === 'delete');
 
-      // Jika server baru menyala kosong sedangkan perangkat ini masih menyimpan cache lokal,
-      // otomatis sinkronkan data ke server agar admin di perangkat lain ikut mendapatkannya.
-      if (serverItems.length === 0 && localItems.length > 0) {
+      // Hanya pulihkan cache lokal ke server jika server benar-benar baru menyala kosong (belum pernah ada penghapusan)
+      if (
+        serverItems.length === 0 &&
+        data.isFreshEmpty === true &&
+        localItems.length > 0 &&
+        !hasPendingDeletes
+      ) {
         await fetch('/api/committee/restore', {
           method: 'POST',
           headers: {
@@ -1216,11 +1222,18 @@ export class HybridRegistrationRepository implements RegistrationRepository {
             return true;
           }
         }
+        throw new Error(
+          `Server sinkronisasi panitia tidak merespons dengan benar (HTTP ${res.status}).`
+        );
       } catch (err) {
-        if (err instanceof Error && err.message.includes('Terlalu banyak percobaan')) {
+        if (
+          err instanceof Error &&
+          (err.message.includes('Terlalu banyak percobaan') ||
+            err.message.includes('Server sinkronisasi panitia'))
+        ) {
           throw err;
         }
-        // Network error fallback to local PIN check below
+        // True network connectivity failure: allow local offline PIN check below
       }
     }
 

@@ -176,7 +176,7 @@ function renderA4SheetToPngDataUrl(
     const stripTitleSize = perPage === 6 ? 16 : 20;
     ctx.font = `bold ${stripTitleSize}px sans-serif`;
     ctx.fillText(
-      `HUT RI KE - 82 · ${eventInfo.locationText.toUpperCase()}`,
+      `${eventInfo.title.toUpperCase()} · ${eventInfo.locationText.toUpperCase()}`,
       ix + iw / 2,
       iy + stripH / 2,
       iw - 110
@@ -559,7 +559,7 @@ export const PrintBibModal: React.FC<PrintBibModalProps> = ({
                               className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border border-[#57534E] bg-white"
                             />
                             <p className="truncate text-[11px] font-bold tracking-wider uppercase">
-                              HUT RI KE - 82 · {eventInfo.locationText}
+                              {eventInfo.title} · {eventInfo.locationText}
                             </p>
                             <span
                               aria-hidden="true"

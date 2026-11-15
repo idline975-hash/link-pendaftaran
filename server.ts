@@ -208,6 +208,7 @@ async function startServer() {
     res.json({
       registrations: committeeStore.getRegistrations(),
       eventInfo: committeeStore.getEventInfo(),
+      isFreshEmpty: committeeStore.isFreshEmpty(),
     });
   });
 

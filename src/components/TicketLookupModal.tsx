@@ -51,11 +51,11 @@ export const TicketLookupModal: React.FC<TicketLookupModalProps> = ({
       return;
     }
     if (trimmedSecond.length < 2) {
-      setError('Masukkan Kode Pendaftaran (RI81-XXXXX) atau Nama Lengkap Anak.');
+      setError('Masukkan Kode Pendaftaran (RI82-XXXXX) atau Nama Lengkap Anak.');
       return;
     }
 
-    const isCode = /^RI81-[A-Z0-9]+$/i.test(trimmedSecond);
+    const isCode = /^RI8[12]-[A-Z0-9]+$/i.test(trimmedSecond);
     setIsSearching(true);
     try {
       const found = await onLookup({
