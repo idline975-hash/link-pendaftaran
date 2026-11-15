@@ -1,0 +1,126 @@
+{
+  "entities": {
+    "Registration": {
+      "title": "Registration",
+      "description": "Data pendaftaran peserta lomba HUT RI ke-81 beserta kode tiket QR dan status daftar ulang.",
+      "type": "object",
+      "properties": {
+        "registrationCode": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 20,
+          "pattern": "^RI81-[A-Z0-9]+$",
+          "description": "Kode registrasi unik peserta untuk tiket QR Code."
+        },
+        "childName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Nama lengkap anak peserta lomba."
+        },
+        "parentName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Nama orang tua atau wali peserta."
+        },
+        "age": {
+          "type": "integer",
+          "description": "Umur anak peserta (3 sampai 15 tahun)."
+        },
+        "whatsapp": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Nomor WhatsApp orang tua/wali (opsional)."
+        },
+        "competitions": {
+          "type": "array",
+          "description": "Daftar ID cabang lomba yang diikuti (1 sampai 6 lomba)."
+        },
+        "checkedIn": {
+          "type": "boolean",
+          "description": "Status kehadiran peserta setelah scan daftar ulang."
+        },
+        "checkedInAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pencatatan daftar ulang (null jika belum hadir)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembuatan pendaftaran."
+        }
+      },
+      "required": [
+        "registrationCode",
+        "childName",
+        "parentName",
+        "age",
+        "whatsapp",
+        "competitions",
+        "checkedIn",
+        "checkedInAt",
+        "createdAt"
+      ]
+    },
+    "EventSetting": {
+      "title": "EventSetting",
+      "description": "Pengaturan judul, tanggal, dan lokasi acara HUT RI ke-81.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "dateText": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "locationText": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 150
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["title", "dateText", "locationText", "updatedAt"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Daftar akun Google panitia yang diberi hak akses membaca dan mengelola data peserta di Firestore.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 150
+        },
+        "addedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["email", "addedAt"]
+    }
+  },
+  "firestore": {
+    "/registrations/{registrationId}": {
+      "schema": { "$ref": "#/entities/Registration" },
+      "description": "Dokumen pendaftaran peserta lomba anak."
+    },
+    "/event_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/EventSetting" },
+      "description": "Pengaturan metadata acara yang tampil publik."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Daftar UID panitia yang terverifikasi."
+    }
+  }
+}

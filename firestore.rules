@@ -1,0 +1,203 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: Default-deny all paths unless explicitly matched below
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string
+        && id.size() > 0
+        && id.size() <= 128
+        && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && (
+          request.auth.token.email == 'idline975@gmail.com'
+          || exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        );
+    }
+
+    function isValidRegistration(data) {
+      return data.keys().hasAll([
+          'registrationCode',
+          'childName',
+          'parentName',
+          'age',
+          'whatsapp',
+          'competitions',
+          'checkedIn',
+          'checkedInAt',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'registrationCode',
+          'childName',
+          'parentName',
+          'age',
+          'whatsapp',
+          'competitions',
+          'checkedIn',
+          'checkedInAt',
+          'createdAt'
+        ])
+        && data.registrationCode is string
+        && data.registrationCode.size() >= 5
+        && data.registrationCode.size() <= 20
+        && data.registrationCode.matches('^RI8[12]-[A-Z0-9]+$')
+        && data.childName is string
+        && data.childName.size() >= 2
+        && data.childName.size() <= 100
+        && data.parentName is string
+        && data.parentName.size() >= 2
+        && data.parentName.size() <= 100
+        && data.age is int
+        && data.age >= 3
+        && data.age <= 15
+        && data.whatsapp is string
+        && data.whatsapp.size() <= 20
+        && data.competitions is list
+        && data.competitions.size() >= 1
+        && data.competitions.size() <= 6
+        && data.competitions[0] is string
+        && data.competitions.hasOnly([
+          'balap-karung',
+          'makan-kerupuk',
+          'paku-botol',
+          'mewarnai',
+          'estafet-kelereng',
+          'tarik-tambang'
+        ])
+        && data.checkedIn is bool
+        && (data.checkedInAt == null || data.checkedInAt is timestamp)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidEventSetting(data) {
+      return data.keys().hasAll(['title', 'dateText', 'locationText', 'updatedAt'])
+        && data.keys().hasOnly(['title', 'dateText', 'locationText', 'updatedAt'])
+        && data.title is string
+        && data.title.size() >= 3
+        && data.title.size() <= 120
+        && data.dateText is string
+        && data.dateText.size() >= 3
+        && data.dateText.size() <= 120
+        && data.locationText is string
+        && data.locationText.size() >= 3
+        && data.locationText.size() <= 150
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['email', 'addedAt'])
+        && data.keys().hasOnly(['email', 'addedAt'])
+        && data.email is string
+        && data.email.size() >= 3
+        && data.email.size() <= 150
+        && data.addedAt is timestamp;
+    }
+
+    match /registrations/{registrationId} {
+      // PII (childName, parentName, whatsapp) strictly restricted to verified committee admins
+      allow get: if isAdmin() && isValidId(registrationId);
+      allow list: if isAdmin();
+
+      // Public registration form submission with strict validation & server-time createdAt
+      // Verified admins may also create pre-checked-in records during backup restore or offline sync
+      allow create: if isValidId(registrationId)
+        && isValidRegistration(incoming())
+        && incoming().createdAt == request.time
+        && (
+          (incoming().checkedIn == false && incoming().checkedInAt == null)
+          || (isAdmin() && incoming().checkedIn == true && incoming().checkedInAt == request.time)
+        );
+
+      // Action-based update strictly by verified committee admins (attendance check-in, data fix, or backup restore)
+      allow update: if isAdmin()
+        && isValidId(registrationId)
+        && isValidRegistration(incoming())
+        && incoming().registrationCode == existing().registrationCode
+        && incoming().createdAt == existing().createdAt
+        && (
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['checkedIn', 'checkedInAt'])
+            && (
+              (incoming().checkedIn == true && incoming().checkedInAt == request.time)
+              || (incoming().checkedIn == false && incoming().checkedInAt == null)
+            )
+          )
+          || incoming().diff(existing()).affectedKeys().hasOnly([
+            'childName',
+            'parentName',
+            'age',
+            'whatsapp',
+            'competitions'
+          ])
+          || (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'childName',
+              'parentName',
+              'age',
+              'whatsapp',
+              'competitions',
+              'checkedIn',
+              'checkedInAt'
+            ])
+            && (
+              (incoming().checkedIn == true && incoming().checkedInAt == request.time)
+              || (incoming().checkedIn == false && incoming().checkedInAt == null)
+            )
+          )
+        );
+
+      allow delete: if isAdmin() && isValidId(registrationId);
+    }
+
+    match /event_settings/{settingId} {
+      allow get: if isValidId(settingId);
+      allow create: if isAdmin()
+        && isValidId(settingId)
+        && isValidEventSetting(incoming())
+        && incoming().updatedAt == request.time;
+      allow update: if isAdmin()
+        && isValidId(settingId)
+        && isValidEventSetting(incoming())
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title',
+          'dateText',
+          'locationText',
+          'updatedAt'
+        ]);
+    }
+
+    match /admins/{adminId} {
+      allow get: if isSignedIn()
+        && isValidId(adminId)
+        && (request.auth.uid == adminId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isAdmin()
+        && isValidId(adminId)
+        && isValidAdminUser(incoming())
+        && incoming().addedAt == request.time;
+      allow delete: if isAdmin() && isValidId(adminId);
+    }
+  }
+}

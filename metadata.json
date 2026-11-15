@@ -1,0 +1,6 @@
+{
+  "name": "Pendaftaran Lomba HUT RI ke-81",
+  "description": "Aplikasi pendaftaran peserta lomba 17 Agustus HUT RI ke-81 dan dashboard rekap data panitia.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
